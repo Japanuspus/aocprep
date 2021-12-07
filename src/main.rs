@@ -2,9 +2,11 @@ use anyhow::{Context, Result};
 use reqwest;
 use serde::{Serialize, Deserialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
+use itertools::Itertools;
 use structopt::StructOpt;
 use toml;
+use scraper::{Html, Selector};
 
 #[derive(Deserialize, Serialize, Debug)]
 struct Config {
@@ -34,10 +36,10 @@ impl RunContext {
     }
 }
 
-fn retrieve_input(config: &Config, day_number: usize) -> Result<String> {
+fn retrieve_aoc(config: &Config, day_number: usize, postfix: &str) -> Result<String> {
     let url = format!(
-        "https://adventofcode.com/{}/day/{}/input",
-        config.year, day_number
+        "https://adventofcode.com/{}/day/{}{}",
+        config.year, day_number, postfix
     );
     let client = reqwest::blocking::Client::new();
     Ok(client
@@ -57,7 +59,7 @@ fn get_inputs(run: &RunContext) -> Result<()> {
         return Ok(());
     }
 
-    let input = retrieve_input(&run.aoc_config()?, run.day_number()?)?;
+    let input = retrieve_aoc(&run.aoc_config()?, run.day_number()?, "/input")?;
     fs::write(&input_file, input)?;
 
     Ok(())
@@ -96,6 +98,52 @@ fn copy_skeleton(run: &RunContext) -> Result<()> {
     Ok(())
 }
 
+fn parse_tests(html: &str) -> Result<Vec<String>> {
+    let document = Html::parse_document(html);
+    let selector = Selector::parse("pre>code").unwrap();
+    let tests = document.select(&selector).map(|el| el.text().join("")).collect();
+    Ok(tests)
+}
+
+#[test]
+fn test_parse_tests() {
+    let html=r##"<!DOCTYPE html>
+    <html lang="en-us">
+    <head>
+    <meta charset="utf-8"/>
+    <title>Day 7 - Advent of Code 2021</title>
+    <link rel="shortcut icon" href="/favicon.png"/>
+    </head><!--
+    Oh, hello!  Funny seeing you here.
+    -->
+    <body>
+    <p>For example, consider the following horizontal positions:</p>
+    <pre><code>16,1,2,0,4,2,7,1,2,14</code></pre>
+    <p>This means there's a crab with horizontal position <code>16</code>, a crab with horizontal position <code>1</code>, and so on.</p>
+    </body>
+    </html>
+    "##;
+    let v=parse_tests(&html).unwrap();
+    assert!(v.len()==1);
+    assert!(v[0]=="16,1,2,0,4,2,7,1,2,14");
+}
+
+fn get_tests(run: &RunContext) -> Result<()> {
+    let html = retrieve_aoc(&run.aoc_config()?, run.day_number()?, "")?;
+    let tests = parse_tests(&html)?;
+
+    for (i, s) in tests.iter().enumerate() {
+        let dst = run.day_folder().join(format!("test{:02}.txt", i));
+        if dst.exists() {
+            println!("Test file {:?} exists", dst);
+        } else {
+            println!("Writing test file {:?}", dst);
+            fs::write(&dst, s)?;
+        }
+    }
+    Ok(())
+}
+
 /// An advent of code skeleton tool
 /// 
 /// Run in project folder with day folder name as argument to copy skeleton
@@ -117,6 +165,8 @@ fn main() -> Result<()> {
         let day_name = current_folder.file_name().unwrap().to_str().expect("Invalid folder name").to_owned();
         let run = RunContext{base_folder, day_name};
         run.aoc_config()?;
-        get_inputs(&run)
+        get_inputs(&run)?;
+        get_tests(&run)?;
+        Ok(())
     }
 }

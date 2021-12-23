@@ -21,7 +21,7 @@ struct RunContext {
 
 impl RunContext {
     fn day_number(&self) -> Result<usize> {
-        self.day_name[4..].parse().with_context(|| format!("Unable to parse day number from {}",self.day_name))
+        self.day_name[3..].parse().with_context(|| format!("Unable to parse day number from {}",self.day_name))
     }
 
     fn day_folder(&self) -> PathBuf {

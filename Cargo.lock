@@ -19,7 +19,7 @@ checksum = "2c0df63cb2955042487fad3aefd2c6e3ae7389ac5dc1beb28921de0b69f779d4"
 
 [[package]]
 name = "aocprep"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "itertools",

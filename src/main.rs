@@ -45,6 +45,8 @@ fn retrieve_aoc(config: &Config, day_number: usize, postfix: &str) -> Result<Str
     Ok(client
         .get(&url)
         .header("Cookie", format!("session={}", config.session))
+        // https://old.reddit.com/r/adventofcode/comments/z9dhtd/please_include_your_contact_info_in_the_useragent/
+        .header("User-Agent", "https://github.com/Japanuspus/aocprep by janus@insignificancegalore.net")
         .send()?
         .error_for_status()
         .context("Input not available (too soon?)")?

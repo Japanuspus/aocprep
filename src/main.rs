@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
-use reqwest;
-use serde::{Serialize, Deserialize};
-use std::fs;
-use std::path::{PathBuf};
 use itertools::Itertools;
+use reqwest;
+use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 use toml;
-use scraper::{Html, Selector};
 
 #[derive(Deserialize, Serialize, Debug)]
 struct Config {
@@ -21,7 +21,9 @@ struct RunContext {
 
 impl RunContext {
     fn day_number(&self) -> Result<usize> {
-        self.day_name[3..].parse().with_context(|| format!("Unable to parse day number from {}",self.day_name))
+        self.day_name[3..]
+            .parse()
+            .with_context(|| format!("Unable to parse day number from {}", self.day_name))
     }
 
     fn day_folder(&self) -> PathBuf {
@@ -31,8 +33,8 @@ impl RunContext {
     fn aoc_config(&self) -> Result<Config> {
         let config_file = self.base_folder.join("aoc.toml");
         fs::read_to_string(&config_file)
-        .with_context(|| format!("Error reading config file {:?}", &config_file))
-        .and_then(|s| toml::from_str::<Config>(&s).context("Parsing config file"))
+            .with_context(|| format!("Error reading config file {:?}", &config_file))
+            .and_then(|s| toml::from_str::<Config>(&s).context("Parsing config file"))
     }
 }
 
@@ -46,7 +48,10 @@ fn retrieve_aoc(config: &Config, day_number: usize, postfix: &str) -> Result<Str
         .get(&url)
         .header("Cookie", format!("session={}", config.session))
         // https://old.reddit.com/r/adventofcode/comments/z9dhtd/please_include_your_contact_info_in_the_useragent/
-        .header("User-Agent", "https://github.com/Japanuspus/aocprep by janus@insignificancegalore.net")
+        .header(
+            "User-Agent",
+            "https://github.com/Japanuspus/aocprep by janus@insignificancegalore.net",
+        )
         .send()?
         .error_for_status()
         .context("Input not available (too soon?)")?
@@ -67,16 +72,9 @@ fn get_inputs(run: &RunContext) -> Result<()> {
     Ok(())
 }
 
-fn copy_skeleton(run: &RunContext) -> Result<()> {
-    let day_folder = run.day_folder();
-    let skeleton_folder = run.base_folder.join("skeleton");
-
-    if day_folder.exists() {
-        println!("Day folder exists, not copying skeleton");
-        return Ok(());
-    }
-
-    let mut cargo: toml::Value = fs::read_to_string(skeleton_folder.join("Cargo.toml"))
+fn expand_cargo_toml(run: &RunContext, src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
+    println!("Expanding Cargo.toml with day name");
+    let mut cargo: toml::Value = fs::read_to_string(src)
         .context("Unable to read skeleton/Cargo.toml")?
         .parse()
         .context("While reading skeleton/Cargo.toml")?;
@@ -91,11 +89,49 @@ fn copy_skeleton(run: &RunContext) -> Result<()> {
             toml::Value::String(run.day_name.clone()),
         );
 
-    let src_folder = day_folder.join("src");
-    fs::create_dir_all(&src_folder)?;
-    fs::write(day_folder.join("Cargo.toml"), cargo.to_string())?;
+    fs::write(dst, cargo.to_string())?;
+    Ok(())
+}
 
-    fs::copy(skeleton_folder.join("main.rs"), src_folder.join("main.rs"))?;
+fn copy_dir_recursive(
+    run: &RunContext,
+    src: impl AsRef<Path>,
+    dst: impl AsRef<Path>,
+    do_expand_cargo_toml: bool,
+) -> Result<()> {
+    fs::create_dir_all(&dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_recursive(
+                run,
+                entry.path(),
+                dst.as_ref().join(entry.file_name()),
+                false,
+            )?;
+        } else if do_expand_cargo_toml && entry.file_name().eq("Cargo.toml") {
+            expand_cargo_toml(run, entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_skeleton(run: &RunContext) -> Result<()> {
+    let day_folder = run.day_folder();
+    let skeleton_folder = run.base_folder.join("skeleton");
+
+    if day_folder.exists() {
+        println!("Day folder exists, not copying skeleton");
+    } else {
+        println!(
+            "No day folder exists for {}, will copy skeleton with Cargo.toml expansion",
+            &run.day_name
+        );
+        copy_dir_recursive(run, skeleton_folder, day_folder, true)?;
+    }
 
     Ok(())
 }
@@ -103,13 +139,16 @@ fn copy_skeleton(run: &RunContext) -> Result<()> {
 fn parse_tests(html: &str) -> Result<Vec<String>> {
     let document = Html::parse_document(html);
     let selector = Selector::parse("pre>code").unwrap();
-    let tests = document.select(&selector).map(|el| el.text().join("")).collect();
+    let tests = document
+        .select(&selector)
+        .map(|el| el.text().join(""))
+        .collect();
     Ok(tests)
 }
 
 #[test]
 fn test_parse_tests() {
-    let html=r##"<!DOCTYPE html>
+    let html = r##"<!DOCTYPE html>
     <html lang="en-us">
     <head>
     <meta charset="utf-8"/>
@@ -125,9 +164,9 @@ fn test_parse_tests() {
     </body>
     </html>
     "##;
-    let v=parse_tests(&html).unwrap();
-    assert!(v.len()==1);
-    assert!(v[0]=="16,1,2,0,4,2,7,1,2,14");
+    let v = parse_tests(&html).unwrap();
+    assert!(v.len() == 1);
+    assert!(v[0] == "16,1,2,0,4,2,7,1,2,14");
 }
 
 fn get_tests(run: &RunContext) -> Result<()> {
@@ -147,7 +186,7 @@ fn get_tests(run: &RunContext) -> Result<()> {
 }
 
 /// An advent of code skeleton tool
-/// 
+///
 /// Run in project folder with day folder name as argument to copy skeleton
 /// Run from within day folder without argument to download inputs
 #[derive(StructOpt, Debug)]
@@ -159,13 +198,27 @@ struct Opt {
 fn main() -> Result<()> {
     let opt = Opt::from_args();
     if let Some(day_name) = opt.day_name {
-        let run = RunContext{day_name, base_folder: std::env::current_dir()?};
+        let run = RunContext {
+            day_name,
+            base_folder: std::env::current_dir()?,
+        };
         copy_skeleton(&run)
     } else {
         let current_folder = std::env::current_dir()?;
-        let base_folder = current_folder.parent().expect("No parent folder").to_owned();
-        let day_name = current_folder.file_name().unwrap().to_str().expect("Invalid folder name").to_owned();
-        let run = RunContext{base_folder, day_name};
+        let base_folder = current_folder
+            .parent()
+            .expect("No parent folder")
+            .to_owned();
+        let day_name = current_folder
+            .file_name()
+            .unwrap()
+            .to_str()
+            .expect("Invalid folder name")
+            .to_owned();
+        let run = RunContext {
+            base_folder,
+            day_name,
+        };
         run.aoc_config()?;
         get_inputs(&run)?;
         get_tests(&run)?;
